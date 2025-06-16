@@ -1,5 +1,4 @@
 #include <iostream>
-#include <string>
 #include "type_list.hpp"
 
 // Helper to print type names
