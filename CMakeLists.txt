@@ -13,13 +13,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
-# Add test executable
+add_executable(scratch scratch.cpp)
+
+add_executable(type_list_example type_list_example.cpp)
+
 add_executable(type_list_test type_list_test.cpp)
 target_link_libraries(type_list_test GTest::gtest_main)
 
-# Add example executable
-add_executable(type_list_example type_list_example.cpp)
-
-# Enable testing
 enable_testing()
 add_test(NAME type_list_test COMMAND type_list_test) 
