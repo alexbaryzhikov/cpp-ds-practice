@@ -14,15 +14,9 @@ private:
     using tuple_type = std::tuple<Types...>;
 
 public:
-    // Get type at index N (non-recursive)
+    // Get type at index N
     template<std::size_t N>
     using type_at_t = std::tuple_element_t<N, tuple_type>;
-
-    // Original recursive version would be replaced:
-    template<std::size_t N>
-    struct type_at {
-        using type = type_at_t<N>;
-    };
 
     // Check if list contains type T
     template<typename T>
@@ -30,7 +24,6 @@ public:
         static constexpr bool value = (std::is_same_v<T, Types> || ...);
     };
 
-    // Helper alias for contains
     template<typename T>
     static constexpr bool contains_v = contains<T>::value;
 
@@ -50,25 +43,16 @@ public:
         static constexpr std::size_t value = get_index<Types...>();
     };
 
-    // Helper alias for index_of
     template<typename T>
     static constexpr std::size_t index_of_v = index_of<T>::value;
 
     // Add type to front
     template<typename T>
-    using push_front = TypeList<T, Types...>;
+    using push_front_t = TypeList<T, Types...>;
 
     // Add type to back
     template<typename T>
-    using push_back = TypeList<Types..., T>;
-
-    // Helper alias for push_front (already an alias type but adding for consistency)
-    template<typename T>
-    using push_front_t = push_front<T>;
-
-    // Helper alias for push_back
-    template<typename T>
-    using push_back_t = push_back<T>;
+    using push_back_t = TypeList<Types..., T>;
 
     // Remove first occurrence of type T
     template<typename T>
@@ -95,7 +79,6 @@ public:
         using type = typename decltype(remove_impl<>::template apply<Types...>())::type;
     };
 
-    // Helper alias
     template<typename T>
     using remove_t = typename remove<T>::type;
 
@@ -111,7 +94,6 @@ public:
         using type = typename decltype(apply<Types...>())::type;
     };
 
-    // Helper alias
     using pop_front_t = typename pop_front::type;
 
     // Remove last type from the list
@@ -132,7 +114,6 @@ public:
         using type = typename decltype(pop_back_impl<>::template apply<Types...>())::type;
     };
 
-    // Helper alias
     using pop_back_t = typename pop_back::type;
 
     // Compare two type lists for equality
