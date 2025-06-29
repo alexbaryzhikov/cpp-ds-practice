@@ -15,6 +15,8 @@ FetchContent_MakeAvailable(googletest)
 
 add_executable(scratch scratch.cpp)
 
+add_executable(dynamic_array_example dynamic_array_example.cpp)
+
 add_executable(type_list_example type_list_example.cpp)
 
 add_executable(type_list_test type_list_test.cpp)
