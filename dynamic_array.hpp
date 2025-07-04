@@ -3,73 +3,127 @@
 
 #include <__utility/exception_guard.h>
 #include <cassert>
+#include <concepts>
+#include <cstddef>
 #include <format>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <new>
 #include <string_view>
 
-struct DefaultAlloc {
-    void* allocate(size_t count, std::align_val_t alignment) {
+template <typename T>
+concept Allocator = requires(T t, size_t count, std::align_val_t alignment, void* pointer) {
+    { t.allocate(count, alignment) } -> std::convertible_to<void*>;
+    { t.deallocate(pointer, alignment) } noexcept;
+};
+
+struct DefaultAllocator {
+    void* allocate(size_t count, std::align_val_t alignment) const {
         return ::operator new(count, alignment);
     }
 
-    void deallocate(void* pointer, std::align_val_t alignment) noexcept {
+    void deallocate(void* pointer, std::align_val_t alignment) const noexcept {
         ::operator delete(pointer, alignment, std::nothrow);
     }
 };
 
-template <typename Val, typename Alloc = DefaultAlloc> 
+template <typename ElementT, Allocator AllocatorT = DefaultAllocator> 
 class DArray {
 private:
-    Val* _data = nullptr;
+    ElementT* _data = nullptr;
     size_t _size = 0;
     size_t _capacity = 0;
-    Alloc alloc;
+    AllocatorT _allocator;
 
 public:
     DArray() noexcept {}
 
     DArray(size_t n) {
-        auto guard = std::__make_exception_guard(DestructArray(*this));
         if (n > 0) {
+            auto guard = std::__make_exception_guard(DestroyArray(*this));
             allocate(n);
             constructAtEnd(n);
+            guard.__complete();
         }
-        guard.__complete();
     }
 
-    DArray(const Val& x, size_t n) {
-        auto guard = std::__make_exception_guard(DestructArray(*this));
+    DArray(const ElementT& x, size_t n) {
         if (n > 0) {
+            auto guard = std::__make_exception_guard(DestroyArray(*this));
             allocate(n);
             constructAtEnd(x, n);
+            guard.__complete();
         }
-        guard.__complete();
     }
 
-    DArray(Val* begin, Val* end) {
-        auto guard = std::__make_exception_guard(DestructArray(*this));
+    DArray(ElementT* begin, ElementT* end) {
         size_t n = static_cast<size_t>(end - begin);
         if (n > 0) {
+            auto guard = std::__make_exception_guard(DestroyArray(*this));
             allocate(n);
             constructAtEnd(begin, end, n);
+            guard.__complete();
         }
-        guard.__complete();
     }
 
-    DArray(std::initializer_list<Val> il) {
-        auto guard = std::__make_exception_guard(DestructArray(*this));
-        if (il.size() > 0) {
-            allocate(il.size());
-            constructAtEnd(il.begin(), il.end(), il.size());
+    DArray(std::initializer_list<ElementT> elements) {
+        if (elements.size() > 0) {
+            auto guard = std::__make_exception_guard(DestroyArray(*this));
+            allocate(elements.size());
+            constructAtEnd(elements.begin(), elements.end(), elements.size());
+            guard.__complete();
         }
-        guard.__complete();
+    }
+
+    DArray& operator=(std::initializer_list<ElementT> elements) {
+        if (elements.size() > 0) {
+            CopyTransaction transaction(*this, elements.begin(), elements.end());
+            transaction.copyElements();
+        } else {
+            clear();
+        }
+        return *this;
+    }
+
+    DArray(const DArray& other) {
+        if (other.size() > 0) {
+            auto guard = std::__make_exception_guard(DestroyArray(*this));
+            allocate(other.size());
+            constructAtEnd(other.begin(), other.end(), other.size());
+            guard.__complete();
+        }
+    }
+
+    DArray& operator=(const DArray& other) {
+        if (this != std::addressof(other)) {
+            if (other.size() > 0) {
+                CopyTransaction transaction(*this, other.begin(), other.end());
+                transaction.copyElements();
+            } else {
+                clear();
+            }
+        }
+        return *this;
+    }
+
+    DArray(DArray&& other) noexcept {
+        std::swap(_data, other._data);
+        std::swap(_size, other._size);
+        std::swap(_capacity, other._capacity);
+    }
+
+    DArray& operator=(DArray&& other) noexcept {
+        destroy();
+        std::swap(_data, other._data);
+        std::swap(_size, other._size);
+        std::swap(_capacity, other._capacity);
+        return *this;
     }
 
     ~DArray() noexcept {
-        DestructArray(*this)();
+        destroy();
     }
 
     size_t size() const noexcept {
@@ -77,7 +131,7 @@ public:
     }
 
     size_t maxSize() const noexcept {
-        return std::numeric_limits<size_t>::max() / sizeof(Val);
+        return std::numeric_limits<size_t>::max() / sizeof(ElementT);
     }
 
     size_t capacity() const noexcept {
@@ -89,61 +143,77 @@ public:
     }
 
     void clear() noexcept {
-        destructAtEnd(_size);
+        if (_data != nullptr) {
+            destructAtEnd(_size);
+        }
     }
 
-    Val& front() noexcept {
+    void destroy() noexcept {
+        if (_data != nullptr) {
+            destructAtEnd(_size);
+            deallocate();
+        }
+    }
+
+    ElementT& front() noexcept {
         return _data[0];
     }
 
-    const Val& front() const noexcept {
+    const ElementT& front() const noexcept {
         return _data[0];
     }
 
-    Val& back() noexcept {
+    ElementT& back() noexcept {
         return _data[_size - 1];
     }
 
-    const Val& back() const noexcept {
+    const ElementT& back() const noexcept {
         return _data[_size - 1];
     }
 
-    Val& operator[](size_t i) noexcept {
+    ElementT& operator[](size_t i) noexcept {
         return _data[i];
     }
 
-    const Val& operator[](size_t i) const noexcept {
+    const ElementT& operator[](size_t i) const noexcept {
         return _data[i];
     }
 
-    Val* begin() noexcept {
+    ElementT* begin() noexcept {
         return _data;
     }
 
-    const Val* begin() const noexcept {
+    const ElementT* begin() const noexcept {
         return _data;
     }
 
-    Val* end() noexcept {
+    ElementT* end() noexcept {
         return _data + _size;
     }
 
-    const Val* end() const noexcept {
+    const ElementT* end() const noexcept {
         return _data + _size;
     }
 
 private:
+    // Allocates array memory for n elements.
+    // Precondition: n <= max size
+    // Postcondition: size == 0
+    // Postcondition: capacity == n
     void allocate(size_t n) {
         if (n > maxSize()) {
             throw std::bad_alloc();
         }
-        _data = static_cast<Val*>(alloc.allocate(n * sizeof(Val), alignment()));
+        _data = static_cast<ElementT*>(_allocator.allocate(n * sizeof(ElementT), alignment()));
         _size = 0;
         _capacity = n;
     }
 
+    // Deallocates array memory.
+    // Postcondition: size == 0
+    // Postcondition: capacity == 0
     void deallocate() noexcept {
-        alloc.deallocate(_data, alignment());
+        _allocator.deallocate(_data, alignment());
         _data = nullptr;
         _size = 0;
         _capacity = 0;
@@ -157,9 +227,7 @@ private:
         assert(n > 0);
         assert(_size + n <= _capacity);
         ConstructTransaction transaction(*this, n);
-        for (; transaction.dst != transaction.end; ++transaction.dst) {
-            new (transaction.dst) Val();
-        }
+        transaction.constructElements();
     }
 
     // Copy constructs n objects from x starting at the end of the array.
@@ -167,18 +235,18 @@ private:
     // Precondition: size + n <= capacity
     // Postcondition: size == size + n
     // Postcondition: array[i] == x for all i in [size - n, size)
-    void constructAtEnd(const Val& x, size_t n) {
+    void constructAtEnd(const ElementT& x, size_t n) {
         assert(n > 0);
         assert(_size + n <= _capacity);
         ConstructTransaction transaction(*this, n);
         transaction.dst = copyElement(x, n, transaction.dst);
     }
 
-    Val* copyElement(const Val& x, size_t n, Val* dst) {
+    static ElementT* copyElement(const ElementT& x, size_t n, ElementT* dst) {
         auto dstCopy = dst;
         auto guard = std::__make_exception_guard(DestructRangeInReverse(dstCopy, dst));
-        for (Val* end = dst + n; dst != end; ++dst) {
-            new (dst) Val(x);
+        for (ElementT* end = dst + n; dst != end; ++dst) {
+            new (dst) ElementT(x);
         }
         guard.__complete();
         return dst;
@@ -189,43 +257,42 @@ private:
     // Precondition: size + n <= capacity
     // Postcondition: size == size + n
     // Postcondition: array[i] == range[j] for all i in [size - n, size) and j in [0, n)
-    void constructAtEnd(const Val* begin, const Val* end, size_t n) {
+    void constructAtEnd(const ElementT* begin, const ElementT* end, size_t n) {
         assert(n > 0);
         assert(_size + n <= _capacity);
         ConstructTransaction transaction(*this, n);
         transaction.dst = copyRange(begin, end, transaction.dst);
     }
 
-    Val* copyRange(const Val* begin, const Val* end, Val* dst) {
+    static ElementT* copyRange(const ElementT* begin, const ElementT* end, ElementT* dst) {
         auto dstCopy = dst;
         auto guard = std::__make_exception_guard(DestructRangeInReverse(dstCopy, dst));
-        for (const Val* src = begin; src != end;) {
-            new (dst) Val(*src);
-            ++src;
-            ++dst;
+        for (const ElementT* src = begin; src != end; ++src, ++dst) {
+            new (dst) ElementT(*src);
         }
         guard.__complete();
         return dst;
     }
 
+    // Destructs n object at the end of the array.
+    // Precondition: n <= size
+    // Postcondition: size == size - n
     void destructAtEnd(size_t n) noexcept {
         assert(n <= _size);
-        Val* begin = _data + _size - 1;
-        Val* end = begin - n;
-        for (; begin != end; --begin) {
-            begin->~Val();
-        }
+        ElementT* begin = _data + _size - n;
+        ElementT* end = _data + _size;
+        DestructRangeInReverse(begin, end)();
         _size -= n;
     }
 
     std::align_val_t alignment() const noexcept {
-        return static_cast<std::align_val_t>(alignof(Val));
+        return static_cast<std::align_val_t>(alignof(ElementT));
     }
 
     struct ConstructTransaction {
         DArray& array;
-        Val* dst;
-        const Val* end;
+        ElementT* dst;
+        const ElementT* end;
 
         ConstructTransaction(DArray& array, size_t n)
             : array(array)
@@ -235,37 +302,70 @@ private:
         ~ConstructTransaction() {
             array._size = static_cast<size_t>(dst - array._data);
         }
+
+        void constructElements() {
+            for (; dst != end; ++dst) {
+                new (dst) ElementT();
+            }
+        }
+    };
+
+    struct CopyTransaction {
+        DArray& array;
+        const ElementT* begin;
+        const ElementT* end;
+        const size_t size;
+        ElementT* data = nullptr;
+
+        CopyTransaction(DArray& array, const ElementT* begin, const ElementT* end) 
+            : array(array)
+            , begin(begin)
+            , end(end)
+            , size(end - begin) {};
+        
+        ~CopyTransaction() {
+            if (data != nullptr) {
+                array._allocator.deallocate(data, array.alignment());
+                data = nullptr;
+            }
+        }
+
+        void copyElements() {
+            data = static_cast<ElementT*>(array._allocator.allocate(size * sizeof(ElementT), array.alignment()));
+            copyRange(begin, end, data);
+            array.clear();
+            std::swap(array._data, data);
+            array._size = size;
+            array._capacity = size;
+        }
     };
 
     struct DestructRangeInReverse {
-        Val*& begin;
-        Val*& end;
+        ElementT*& begin;
+        ElementT*& end;
 
-        DestructRangeInReverse(Val*& begin, Val*& end): begin(begin), end(end) {}
+        DestructRangeInReverse(ElementT*& begin, ElementT*& end): begin(begin), end(end) {}
 
         void operator()() const {
-            auto reverseBegin = std::reverse_iterator<Val*>(end);
-            auto reverseEnd = std::reverse_iterator<Val*>(begin);
+            auto reverseBegin = std::reverse_iterator<ElementT*>(end);
+            auto reverseEnd = std::reverse_iterator<ElementT*>(begin);
             for (; reverseBegin != reverseEnd; ++reverseBegin) {
-                reverseBegin->~Val();
+                reverseBegin->~ElementT();
             }
         }
     };
 
-    struct DestructArray {
+    struct DestroyArray {
         DArray& array;
 
-        DestructArray(DArray& array) : array(array) {}
+        DestroyArray(DArray& array) : array(array) {}
         
         void operator()() {
-            if (array._data != nullptr) {
-                array.destructAtEnd(array._size);
-                array.deallocate();
-            }
+            array.destroy();
         }
     };
 
-    friend std::formatter<DArray<Val>>;
+    friend std::formatter<DArray<ElementT>>;
 };
 
 template<typename V>
