@@ -10,12 +10,23 @@
 #include <new>
 #include <string_view>
 
-template <typename V> 
+struct DefaultAlloc {
+    void* allocate(size_t count, std::align_val_t alignment) {
+        return ::operator new(count, alignment);
+    }
+
+    void deallocate(void* pointer, std::align_val_t alignment) noexcept {
+        ::operator delete(pointer, alignment, std::nothrow);
+    }
+};
+
+template <typename Val, typename Alloc = DefaultAlloc> 
 class DArray {
 private:
-    V* _data = nullptr;
-    std::size_t _size = 0;
-    std::size_t _capacity = 0;
+    Val* _data = nullptr;
+    size_t _size = 0;
+    size_t _capacity = 0;
+    Alloc alloc;
 
 public:
     DArray() noexcept {}
@@ -29,7 +40,7 @@ public:
         guard.__complete();
     }
 
-    DArray(const V& x, size_t n) {
+    DArray(const Val& x, size_t n) {
         auto guard = std::__make_exception_guard(DestructArray(*this));
         if (n > 0) {
             allocate(n);
@@ -38,7 +49,7 @@ public:
         guard.__complete();
     }
 
-    DArray(V* begin, V* end) {
+    DArray(Val* begin, Val* end) {
         auto guard = std::__make_exception_guard(DestructArray(*this));
         size_t n = static_cast<size_t>(end - begin);
         if (n > 0) {
@@ -48,7 +59,7 @@ public:
         guard.__complete();
     }
 
-    DArray(std::initializer_list<V> il) {
+    DArray(std::initializer_list<Val> il) {
         auto guard = std::__make_exception_guard(DestructArray(*this));
         if (il.size() > 0) {
             allocate(il.size());
@@ -66,7 +77,7 @@ public:
     }
 
     size_t maxSize() const noexcept {
-        return std::numeric_limits<size_t>::max() / sizeof(V);
+        return std::numeric_limits<size_t>::max() / sizeof(Val);
     }
 
     size_t capacity() const noexcept {
@@ -81,43 +92,43 @@ public:
         destructAtEnd(_size);
     }
 
-    V& front() noexcept {
+    Val& front() noexcept {
         return _data[0];
     }
 
-    const V& front() const noexcept {
+    const Val& front() const noexcept {
         return _data[0];
     }
 
-    V& back() noexcept {
+    Val& back() noexcept {
         return _data[_size - 1];
     }
 
-    const V& back() const noexcept {
+    const Val& back() const noexcept {
         return _data[_size - 1];
     }
 
-    V& operator[](size_t i) noexcept {
+    Val& operator[](size_t i) noexcept {
         return _data[i];
     }
 
-    const V& operator[](size_t i) const noexcept {
+    const Val& operator[](size_t i) const noexcept {
         return _data[i];
     }
 
-    V* begin() noexcept {
+    Val* begin() noexcept {
         return _data;
     }
 
-    const V* begin() const noexcept {
+    const Val* begin() const noexcept {
         return _data;
     }
 
-    V* end() noexcept {
+    Val* end() noexcept {
         return _data + _size;
     }
 
-    const V* end() const noexcept {
+    const Val* end() const noexcept {
         return _data + _size;
     }
 
@@ -126,13 +137,13 @@ private:
         if (n > maxSize()) {
             throw std::bad_alloc();
         }
-        _data = static_cast<V*>(::operator new(n * sizeof(V), align()));
+        _data = static_cast<Val*>(alloc.allocate(n * sizeof(Val), alignment()));
         _size = 0;
         _capacity = n;
     }
 
     void deallocate() noexcept {
-        ::operator delete(_data, align(), std::nothrow_t());
+        alloc.deallocate(_data, alignment());
         _data = nullptr;
         _size = 0;
         _capacity = 0;
@@ -147,7 +158,7 @@ private:
         assert(_size + n <= _capacity);
         ConstructTransaction transaction(*this, n);
         for (; transaction.dst != transaction.end; ++transaction.dst) {
-            new (transaction.dst) V();
+            new (transaction.dst) Val();
         }
     }
 
@@ -156,18 +167,18 @@ private:
     // Precondition: size + n <= capacity
     // Postcondition: size == size + n
     // Postcondition: array[i] == x for all i in [size - n, size)
-    void constructAtEnd(const V& x, size_t n) {
+    void constructAtEnd(const Val& x, size_t n) {
         assert(n > 0);
         assert(_size + n <= _capacity);
         ConstructTransaction transaction(*this, n);
         transaction.dst = copyElement(x, n, transaction.dst);
     }
 
-    V* copyElement(const V& x, size_t n, V* dst) {
+    Val* copyElement(const Val& x, size_t n, Val* dst) {
         auto dstCopy = dst;
         auto guard = std::__make_exception_guard(DestructRangeInReverse(dstCopy, dst));
-        for (V* end = dst + n; dst != end; ++dst) {
-            new (dst) V(x);
+        for (Val* end = dst + n; dst != end; ++dst) {
+            new (dst) Val(x);
         }
         guard.__complete();
         return dst;
@@ -178,18 +189,18 @@ private:
     // Precondition: size + n <= capacity
     // Postcondition: size == size + n
     // Postcondition: array[i] == range[j] for all i in [size - n, size) and j in [0, n)
-    void constructAtEnd(const V* begin, const V* end, size_t n) {
+    void constructAtEnd(const Val* begin, const Val* end, size_t n) {
         assert(n > 0);
         assert(_size + n <= _capacity);
         ConstructTransaction transaction(*this, n);
         transaction.dst = copyRange(begin, end, transaction.dst);
     }
 
-    V* copyRange(const V* begin, const V* end, V* dst) {
+    Val* copyRange(const Val* begin, const Val* end, Val* dst) {
         auto dstCopy = dst;
         auto guard = std::__make_exception_guard(DestructRangeInReverse(dstCopy, dst));
-        for (const V* src = begin; src != end;) {
-            new (dst) V(*src);
+        for (const Val* src = begin; src != end;) {
+            new (dst) Val(*src);
             ++src;
             ++dst;
         }
@@ -199,22 +210,22 @@ private:
 
     void destructAtEnd(size_t n) noexcept {
         assert(n <= _size);
-        V* begin = _data + _size - 1;
-        V* end = begin - n;
+        Val* begin = _data + _size - 1;
+        Val* end = begin - n;
         for (; begin != end; --begin) {
-            begin->~V();
+            begin->~Val();
         }
         _size -= n;
     }
 
-    std::align_val_t align() const noexcept {
-        return static_cast<std::align_val_t>(alignof(V));
+    std::align_val_t alignment() const noexcept {
+        return static_cast<std::align_val_t>(alignof(Val));
     }
 
     struct ConstructTransaction {
         DArray& array;
-        V* dst;
-        const V* end;
+        Val* dst;
+        const Val* end;
 
         ConstructTransaction(DArray& array, size_t n)
             : array(array)
@@ -227,16 +238,16 @@ private:
     };
 
     struct DestructRangeInReverse {
-        V*& begin;
-        V*& end;
+        Val*& begin;
+        Val*& end;
 
-        DestructRangeInReverse(V*& begin, V*& end): begin(begin), end(end) {}
+        DestructRangeInReverse(Val*& begin, Val*& end): begin(begin), end(end) {}
 
         void operator()() const {
-            auto reverseBegin = std::reverse_iterator<V*>(end);
-            auto reverseEnd = std::reverse_iterator<V*>(begin);
+            auto reverseBegin = std::reverse_iterator<Val*>(end);
+            auto reverseEnd = std::reverse_iterator<Val*>(begin);
             for (; reverseBegin != reverseEnd; ++reverseBegin) {
-                reverseBegin->~V();
+                reverseBegin->~Val();
             }
         }
     };
@@ -254,7 +265,7 @@ private:
         }
     };
 
-    friend std::formatter<DArray<V>>;
+    friend std::formatter<DArray<Val>>;
 };
 
 template<typename V>

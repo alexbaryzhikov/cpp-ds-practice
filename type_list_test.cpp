@@ -1,23 +1,6 @@
 #include <gtest/gtest.h>
 #include "type_list.hpp"
 
-// Helper to get type names (same as in the example)
-template<typename T>
-constexpr const char* type_name() {
-    if constexpr (std::is_same_v<T, int>)
-        return "int";
-    else if constexpr (std::is_same_v<T, double>)
-        return "double";
-    else if constexpr (std::is_same_v<T, char>)
-        return "char";
-    else if constexpr (std::is_same_v<T, float>)
-        return "float";
-    else if constexpr (std::is_same_v<T, bool>)
-        return "bool";
-    else
-        return "unknown";
-}
-
 TEST(TypeListTest, Size) {
     using MyList = TypeList<int, double, char, float>;
     EXPECT_EQ(MyList::size, 4);
