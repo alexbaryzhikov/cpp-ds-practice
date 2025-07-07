@@ -1,16 +1,17 @@
 #include "dynamic_array.hpp"
 #include <gtest/gtest.h>
 #include <initializer_list>
-#include <new>
-#include <stdexcept>
 #include <limits>
+#include <new>
+#include <print>
+#include <stdexcept>
 
 // Test allocator that can throw during allocation
 struct TestAllocator {
     static int allocationCount;
     static int deallocationCount;
     static int allocationThrowsAt;
-    
+
     void* allocate(size_t count, std::align_val_t alignment) const {
         if (allocationCount + 1 == allocationThrowsAt) {
             throw std::bad_alloc();
@@ -40,39 +41,62 @@ struct Probe {
     static int constructionCount;
     static int destructionCount;
     static int constructorThrowsAt;
+    static bool verbose;
 
     int id;
 
-    Probe(): id(0)  {
+    Probe()
+        : id(0) {
         if (constructionCount + 1 == constructorThrowsAt) {
+            if (verbose) {
+                std::println("{:2}) Failed to default construct, id: {}", constructionCount + 1, id);
+            }
             throw std::runtime_error("Construction failed");
         }
         ++constructionCount;
+        if (verbose) {
+            std::println("{:2}) Default constructed", constructionCount);
+        }
     }
 
-    Probe(int id): id(id) {
+    Probe(int id)
+        : id(id) {
         // Used for test values initialization
     }
-    
-    Probe(const Probe& other): id(other.id) {
+
+    Probe(const Probe& other)
+        : id(other.id) {
         if (constructionCount + 1 == constructorThrowsAt) {
+            if (verbose) {
+                std::println("{:2}) Failed to copy construct, id: {}", constructionCount + 1, id);
+            }
             throw std::runtime_error("Copy construction failed");
         }
         ++constructionCount;
-    }
-    
-    Probe& operator=(const Probe& other) {
-        id = other.id;
-        if (constructionCount + 1 == constructorThrowsAt) {
-            throw std::runtime_error("Copy assignment failed");
+        if (verbose) {
+            std::println("{:2}) Copy constructed, id: {}", constructionCount, id);
         }
-        ++constructionCount;
-        return *this;
     }
-    
+
+    Probe(Probe&& other) noexcept
+        : id(other.id) {
+        ++constructionCount;
+        other.id = -1;
+        if (verbose) {
+            std::println("{:2}) Move constructed, id: {}", constructionCount, id);
+        }
+    }
+
     ~Probe() {
         ++destructionCount;
+        if (verbose) {
+            std::println("{:2}) Destructed, id: {}", destructionCount, id);
+        }
     }
+
+    Probe& operator=(const Probe& other) = delete;
+
+    Probe& operator=(Probe&& other) noexcept = delete;
 
     bool operator==(const Probe& other) const = default;
 
@@ -80,12 +104,14 @@ struct Probe {
         constructionCount = 0;
         destructionCount = 0;
         constructorThrowsAt = -1;
+        verbose = false;
     }
 };
 
 int Probe::constructionCount = 0;
 int Probe::destructionCount = 0;
 int Probe::constructorThrowsAt = -1;
+bool Probe::verbose = false;
 
 class DArrayTest : public ::testing::Test {
 protected:
@@ -100,6 +126,7 @@ using DArrayType = DArray<Probe, TestAllocator>;
 // Test default constructor success
 TEST_F(DArrayTest, DefaultConstructorSuccess) {
     DArray<int> arr;
+
     EXPECT_EQ(arr.size(), 0);
     EXPECT_EQ(arr.capacity(), 0);
     EXPECT_TRUE(arr.empty());
@@ -108,6 +135,7 @@ TEST_F(DArrayTest, DefaultConstructorSuccess) {
 // Test size constructor success
 TEST_F(DArrayTest, SizeConstructorSuccess) {
     DArray<int> arr1(5);
+
     EXPECT_EQ(arr1.size(), 5);
     EXPECT_EQ(arr1.capacity(), 5);
 }
@@ -116,9 +144,7 @@ TEST_F(DArrayTest, SizeConstructorSuccess) {
 TEST_F(DArrayTest, SizeConstructorAllocationFailure) {
     TestAllocator::allocationThrowsAt = 1;
 
-    EXPECT_THROW({
-        DArrayType arr(10);
-    }, std::bad_alloc);
+    EXPECT_THROW({ DArrayType arr(10); }, std::bad_alloc);
 
     EXPECT_EQ(TestAllocator::allocationCount, 0);
     EXPECT_EQ(TestAllocator::deallocationCount, 0);
@@ -129,11 +155,9 @@ TEST_F(DArrayTest, SizeConstructorAllocationFailure) {
 // Test size constructor with element construction failure
 TEST_F(DArrayTest, SizeConstructorElementFailure) {
     Probe::constructorThrowsAt = 5;
-    
-    EXPECT_THROW({
-        DArrayType arr(10);
-    }, std::runtime_error);
-    
+
+    EXPECT_THROW({ DArrayType arr(10); }, std::runtime_error);
+
     EXPECT_EQ(TestAllocator::allocationCount, 1);
     EXPECT_EQ(TestAllocator::deallocationCount, 1);
     EXPECT_EQ(Probe::constructionCount, 4);
@@ -143,6 +167,7 @@ TEST_F(DArrayTest, SizeConstructorElementFailure) {
 // Test fill constructor success
 TEST_F(DArrayTest, FillConstructorSuccess) {
     DArray<int> arr2(42, 3);
+
     EXPECT_EQ(arr2.size(), 3);
     EXPECT_EQ(arr2.capacity(), 3);
     EXPECT_EQ(arr2[0], 42);
@@ -155,9 +180,7 @@ TEST_F(DArrayTest, FillConstructorAllocationFailure) {
     TestAllocator::allocationThrowsAt = 1;
     Probe value = 42;
 
-    EXPECT_THROW({
-        DArrayType arr(value, 10);
-    }, std::bad_alloc);
+    EXPECT_THROW({ DArrayType arr(value, 10); }, std::bad_alloc);
 
     EXPECT_EQ(TestAllocator::allocationCount, 0);
     EXPECT_EQ(TestAllocator::deallocationCount, 0);
@@ -170,10 +193,8 @@ TEST_F(DArrayTest, FillConstructorElementFailure) {
     Probe::constructorThrowsAt = 5;
     Probe value = 42;
 
-    EXPECT_THROW({
-        DArrayType arr(value, 10);
-    }, std::runtime_error);
-    
+    EXPECT_THROW({ DArrayType arr(value, 10); }, std::runtime_error);
+
     EXPECT_EQ(TestAllocator::allocationCount, 1);
     EXPECT_EQ(TestAllocator::deallocationCount, 1);
     EXPECT_EQ(Probe::constructionCount, 4);
@@ -183,7 +204,9 @@ TEST_F(DArrayTest, FillConstructorElementFailure) {
 // Test range constructor success
 TEST_F(DArrayTest, RangeConstructorSuccess) {
     int data[] = {1, 2, 3};
+
     DArray<int> arr3(data, data + 3);
+
     EXPECT_EQ(arr3.size(), 3);
     EXPECT_EQ(arr3.capacity(), 3);
     EXPECT_EQ(arr3[0], 1);
@@ -193,13 +216,11 @@ TEST_F(DArrayTest, RangeConstructorSuccess) {
 
 // Test range constructor with allocation failure
 TEST_F(DArrayTest, RangeConstructorAllocationFailure) {
-    TestAllocator::allocationThrowsAt = 1;
-    
     Probe data[] = {1, 2, 3, 4, 5};
-    EXPECT_THROW({
-        DArrayType arr(data, data + 5);
-    }, std::bad_alloc);
-    
+    TestAllocator::allocationThrowsAt = 1;
+
+    EXPECT_THROW({ DArrayType arr(data, data + 5); }, std::bad_alloc);
+
     EXPECT_EQ(TestAllocator::allocationCount, 0);
     EXPECT_EQ(TestAllocator::deallocationCount, 0);
     EXPECT_EQ(Probe::constructionCount, 0);
@@ -208,13 +229,11 @@ TEST_F(DArrayTest, RangeConstructorAllocationFailure) {
 
 // Test range constructor with element construction failure
 TEST_F(DArrayTest, RangeConstructorElementFailure) {
-    Probe::constructorThrowsAt = 5;
     Probe data[] = {1, 2, 3, 4, 5};
+    Probe::constructorThrowsAt = 5;
 
-    EXPECT_THROW({
-        DArrayType arr(data, data + 5);
-    }, std::runtime_error);
-    
+    EXPECT_THROW({ DArrayType arr(data, data + 5); }, std::runtime_error);
+
     EXPECT_EQ(TestAllocator::allocationCount, 1);
     EXPECT_EQ(TestAllocator::deallocationCount, 1);
     EXPECT_EQ(Probe::constructionCount, 4);
@@ -224,6 +243,7 @@ TEST_F(DArrayTest, RangeConstructorElementFailure) {
 // Test initializer list constructor success
 TEST_F(DArrayTest, InitializerListConstructorSuccess) {
     DArray<int> arr4 = {10, 20, 30};
+
     EXPECT_EQ(arr4.size(), 3);
     EXPECT_EQ(arr4.capacity(), 3);
     EXPECT_EQ(arr4[0], 10);
@@ -233,13 +253,11 @@ TEST_F(DArrayTest, InitializerListConstructorSuccess) {
 
 // Test initializer list constructor with allocation failure
 TEST_F(DArrayTest, InitializerListConstructorAllocationFailure) {
-    TestAllocator::allocationThrowsAt = 1;
     std::initializer_list<Probe> elements = {1, 2, 3, 4, 5};
+    TestAllocator::allocationThrowsAt = 1;
 
-    EXPECT_THROW({
-        DArrayType arr = elements;
-    }, std::bad_alloc);
-    
+    EXPECT_THROW({ DArrayType arr = elements; }, std::bad_alloc);
+
     EXPECT_EQ(TestAllocator::allocationCount, 0);
     EXPECT_EQ(TestAllocator::deallocationCount, 0);
     EXPECT_EQ(Probe::constructionCount, 0);
@@ -248,13 +266,11 @@ TEST_F(DArrayTest, InitializerListConstructorAllocationFailure) {
 
 // Test initializer list constructor with element construction failure
 TEST_F(DArrayTest, InitializerListConstructorElementFailure) {
-    Probe::constructorThrowsAt = 5;
     std::initializer_list<Probe> elements = {1, 2, 3, 4, 5};
+    Probe::constructorThrowsAt = 5;
 
-    EXPECT_THROW({
-        DArrayType arr = elements;
-    }, std::runtime_error);
-    
+    EXPECT_THROW({ DArrayType arr = elements; }, std::runtime_error);
+
     EXPECT_EQ(TestAllocator::allocationCount, 1);
     EXPECT_EQ(TestAllocator::deallocationCount, 1);
     EXPECT_EQ(Probe::constructionCount, 4);
@@ -276,7 +292,6 @@ TEST_F(DArrayTest, InitializerListAssignmentSuccess) {
         EXPECT_EQ(arr[1].id, 7);
         EXPECT_EQ(arr[2].id, 8);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 2);
     EXPECT_EQ(TestAllocator::deallocationCount, 2);
     EXPECT_EQ(Probe::constructionCount, 8);
@@ -294,7 +309,6 @@ TEST_F(DArrayTest, InitializerListAssignmentOfEmptyArray) {
         EXPECT_EQ(arr.size(), 0);
         EXPECT_EQ(arr.capacity(), 5);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 1);
     EXPECT_EQ(TestAllocator::deallocationCount, 1);
     EXPECT_EQ(Probe::constructionCount, 5);
@@ -303,15 +317,13 @@ TEST_F(DArrayTest, InitializerListAssignmentOfEmptyArray) {
 
 // Test initializer list assignment with allocation failure
 TEST_F(DArrayTest, InitializerListAssignmentAllocationFailure) {
-    TestAllocator::allocationThrowsAt = 2;
     std::initializer_list<Probe> elements1 = {1, 2, 3, 4, 5};
     std::initializer_list<Probe> elements2 = {6, 7, 8};
+    TestAllocator::allocationThrowsAt = 2;
     {
         DArrayType arr = elements1;
 
-        EXPECT_THROW({ 
-            arr = elements2; 
-        }, std::bad_alloc);
+        EXPECT_THROW({ arr = elements2; }, std::bad_alloc);
 
         EXPECT_EQ(arr.size(), 5);
         EXPECT_EQ(arr.capacity(), 5);
@@ -321,7 +333,6 @@ TEST_F(DArrayTest, InitializerListAssignmentAllocationFailure) {
         EXPECT_EQ(arr[3].id, 4);
         EXPECT_EQ(arr[4].id, 5);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 1);
     EXPECT_EQ(TestAllocator::deallocationCount, 1);
     EXPECT_EQ(Probe::constructionCount, 5);
@@ -330,15 +341,13 @@ TEST_F(DArrayTest, InitializerListAssignmentAllocationFailure) {
 
 // Test initializer list assignment with element construction failure
 TEST_F(DArrayTest, InitializerListAssignmentElementFailure) {
-    Probe::constructorThrowsAt = 8;
     std::initializer_list<Probe> elements1 = {1, 2, 3, 4, 5};
     std::initializer_list<Probe> elements2 = {6, 7, 8};
+    Probe::constructorThrowsAt = 8;
     {
         DArrayType arr = elements1;
 
-        EXPECT_THROW({ 
-            arr = elements2; 
-        }, std::runtime_error);
+        EXPECT_THROW({ arr = elements2; }, std::runtime_error);
 
         EXPECT_EQ(arr.size(), 5);
         EXPECT_EQ(arr.capacity(), 5);
@@ -348,7 +357,6 @@ TEST_F(DArrayTest, InitializerListAssignmentElementFailure) {
         EXPECT_EQ(arr[3].id, 4);
         EXPECT_EQ(arr[4].id, 5);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 2);
     EXPECT_EQ(TestAllocator::deallocationCount, 2);
     EXPECT_EQ(Probe::constructionCount, 7);
@@ -360,15 +368,17 @@ TEST_F(DArrayTest, CopyConstructorSuccess) {
     std::initializer_list<Probe> elements = {1, 2, 3, 4, 5};
     {
         DArrayType arr = elements;
+
         DArrayType copy = arr;
 
         EXPECT_EQ(copy.size(), arr.size());
         EXPECT_EQ(copy.capacity(), arr.size());
-        for (int i = 0; i < copy.size(); ++i) {
-            EXPECT_EQ(copy[i], arr[i]);
-        }
+        EXPECT_EQ(copy[0], arr[0]);
+        EXPECT_EQ(copy[1], arr[1]);
+        EXPECT_EQ(copy[2], arr[2]);
+        EXPECT_EQ(copy[3], arr[3]);
+        EXPECT_EQ(copy[4], arr[4]);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 2);
     EXPECT_EQ(TestAllocator::deallocationCount, 2);
     EXPECT_EQ(Probe::constructionCount, 10);
@@ -377,16 +387,13 @@ TEST_F(DArrayTest, CopyConstructorSuccess) {
 
 // Test copy constructor with allocation failure
 TEST_F(DArrayTest, CopyConstructorAllocationFailure) {
-    TestAllocator::allocationThrowsAt = 2;
     std::initializer_list<Probe> elements = {1, 2, 3, 4, 5};
+    TestAllocator::allocationThrowsAt = 2;
     {
         DArrayType arr = elements;
 
-        EXPECT_THROW({
-            DArrayType copy = arr;
-        }, std::bad_alloc);
+        EXPECT_THROW({ DArrayType copy = arr; }, std::bad_alloc);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 1);
     EXPECT_EQ(TestAllocator::deallocationCount, 1);
     EXPECT_EQ(Probe::constructionCount, 5);
@@ -395,16 +402,13 @@ TEST_F(DArrayTest, CopyConstructorAllocationFailure) {
 
 // Test copy constructor with element construction failure
 TEST_F(DArrayTest, CopyConstructorElementFailure) {
-    Probe::constructorThrowsAt = 10;
     std::initializer_list<Probe> elements = {1, 2, 3, 4, 5};
+    Probe::constructorThrowsAt = 10;
     {
         DArrayType arr = elements;
 
-        EXPECT_THROW({
-            DArrayType copy = arr;
-        }, std::runtime_error);
+        EXPECT_THROW({ DArrayType copy = arr; }, std::runtime_error);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 2);
     EXPECT_EQ(TestAllocator::deallocationCount, 2);
     EXPECT_EQ(Probe::constructionCount, 9);
@@ -423,11 +427,12 @@ TEST_F(DArrayTest, CopyAssignmentSuccess) {
 
         EXPECT_EQ(arr2.size(), arr1.size());
         EXPECT_EQ(arr2.capacity(), arr1.size());
-        for (int i = 0; i < arr2.size(); ++i) {
-            EXPECT_EQ(arr2[i], arr1[i]);
-        }
+        EXPECT_EQ(arr2[0], arr1[0]);
+        EXPECT_EQ(arr2[1], arr1[1]);
+        EXPECT_EQ(arr2[2], arr1[2]);
+        EXPECT_EQ(arr2[3], arr1[3]);
+        EXPECT_EQ(arr2[4], arr1[4]);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 3);
     EXPECT_EQ(TestAllocator::deallocationCount, 3);
     EXPECT_EQ(Probe::constructionCount, 13);
@@ -446,7 +451,6 @@ TEST_F(DArrayTest, CopyAssignmentOfEmptyArray) {
         EXPECT_EQ(arr2.size(), 0);
         EXPECT_EQ(arr2.capacity(), 5);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 1);
     EXPECT_EQ(TestAllocator::deallocationCount, 1);
     EXPECT_EQ(Probe::constructionCount, 5);
@@ -455,16 +459,14 @@ TEST_F(DArrayTest, CopyAssignmentOfEmptyArray) {
 
 // Test copy assignment with allocation failure
 TEST_F(DArrayTest, CopyAssignmentAllocationFailure) {
-    TestAllocator::allocationThrowsAt = 3;
     std::initializer_list<Probe> elements1 = {1, 2, 3, 4, 5};
     std::initializer_list<Probe> elements2 = {6, 7, 8};
+    TestAllocator::allocationThrowsAt = 3;
     {
         DArrayType arr1 = elements1;
         DArrayType arr2 = elements2;
 
-        EXPECT_THROW({ 
-            arr2 = arr1; 
-        }, std::bad_alloc);
+        EXPECT_THROW({ arr2 = arr1; }, std::bad_alloc);
 
         EXPECT_EQ(arr2.size(), 3);
         EXPECT_EQ(arr2.capacity(), 3);
@@ -472,7 +474,6 @@ TEST_F(DArrayTest, CopyAssignmentAllocationFailure) {
         EXPECT_EQ(arr2[1].id, 7);
         EXPECT_EQ(arr2[2].id, 8);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 2);
     EXPECT_EQ(TestAllocator::deallocationCount, 2);
     EXPECT_EQ(Probe::constructionCount, 8);
@@ -481,16 +482,14 @@ TEST_F(DArrayTest, CopyAssignmentAllocationFailure) {
 
 // Test copy assignment with element construction failure
 TEST_F(DArrayTest, CopyAssignmentElementFailure) {
-    Probe::constructorThrowsAt = 13;
     std::initializer_list<Probe> elements1 = {1, 2, 3, 4, 5};
     std::initializer_list<Probe> elements2 = {6, 7, 8};
+    Probe::constructorThrowsAt = 13;
     {
         DArrayType arr1 = elements1;
         DArrayType arr2 = elements2;
 
-        EXPECT_THROW({ 
-            arr2 = arr1; 
-        }, std::runtime_error);
+        EXPECT_THROW({ arr2 = arr1; }, std::runtime_error);
 
         EXPECT_EQ(arr2.size(), 3);
         EXPECT_EQ(arr2.capacity(), 3);
@@ -498,7 +497,6 @@ TEST_F(DArrayTest, CopyAssignmentElementFailure) {
         EXPECT_EQ(arr2[1].id, 7);
         EXPECT_EQ(arr2[2].id, 8);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 3);
     EXPECT_EQ(TestAllocator::deallocationCount, 3);
     EXPECT_EQ(Probe::constructionCount, 12);
@@ -508,11 +506,11 @@ TEST_F(DArrayTest, CopyAssignmentElementFailure) {
 // Test move constructor success
 TEST_F(DArrayTest, MoveConstructorSuccess) {
     DArray<int> src = {1, 2, 3};
+
     DArray<int> dst = std::move(src);
 
     EXPECT_EQ(src.size(), 0);
     EXPECT_EQ(src.capacity(), 0);
-
     EXPECT_EQ(dst.size(), 3);
     EXPECT_EQ(dst.capacity(), 3);
     EXPECT_EQ(dst[0], 1);
@@ -532,7 +530,6 @@ TEST_F(DArrayTest, MoveAssignmentSuccess) {
 
         EXPECT_EQ(src.size(), 0);
         EXPECT_EQ(src.capacity(), 0);
-
         EXPECT_EQ(dst.size(), 5);
         EXPECT_EQ(dst.capacity(), 5);
         EXPECT_EQ(dst[0].id, 1);
@@ -541,7 +538,6 @@ TEST_F(DArrayTest, MoveAssignmentSuccess) {
         EXPECT_EQ(dst[3].id, 4);
         EXPECT_EQ(dst[4].id, 5);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 2);
     EXPECT_EQ(TestAllocator::deallocationCount, 2);
     EXPECT_EQ(Probe::constructionCount, 8);
@@ -559,11 +555,9 @@ TEST_F(DArrayTest, MoveAssignmentOfEmptyArray) {
 
         EXPECT_EQ(src.size(), 0);
         EXPECT_EQ(src.capacity(), 0);
-
         EXPECT_EQ(dst.size(), 0);
         EXPECT_EQ(dst.capacity(), 5);
     }
-
     EXPECT_EQ(TestAllocator::allocationCount, 1);
     EXPECT_EQ(TestAllocator::deallocationCount, 1);
     EXPECT_EQ(Probe::constructionCount, 5);
@@ -578,45 +572,42 @@ TEST_F(DArrayTest, DestructorCleanup) {
         EXPECT_EQ(Probe::constructionCount, 5);
         EXPECT_EQ(Probe::destructionCount, 0);
     }
-    
     EXPECT_EQ(Probe::destructionCount, 5);
 }
 
-// Test with zero size (edge case)
+// Test construction with zero size (edge case)
 TEST_F(DArrayTest, ZeroSizeConstruction) {
     DArray<int> arr1(0);
     EXPECT_EQ(arr1.size(), 0);
     EXPECT_EQ(arr1.capacity(), 0);
-    
+
     DArray<int> arr2(42, 0);
     EXPECT_EQ(arr2.size(), 0);
     EXPECT_EQ(arr2.capacity(), 0);
-    
+
     int data[] = {1, 2, 3};
     DArray<int> arr3(data, data); // Empty range
     EXPECT_EQ(arr3.size(), 0);
     EXPECT_EQ(arr3.capacity(), 0);
-    
+
     DArray<int> arr4 = {}; // Empty initializer list
     EXPECT_EQ(arr4.size(), 0);
     EXPECT_EQ(arr4.capacity(), 0);
 }
 
-// Test with very large size
+// Test construction with very large size
 TEST_F(DArrayTest, LargeSizeConstruction) {
     size_t large_size = std::numeric_limits<size_t>::max() / sizeof(int) + 1;
-    
-    EXPECT_THROW({
-        DArray<int> arr(large_size);
-    }, std::bad_alloc);
+
+    EXPECT_THROW({ DArray<int> arr(large_size); }, std::bad_alloc);
 }
 
 // Test that clear() works correctly
 TEST_F(DArrayTest, Clear) {
     DArray<int> arr = {1, 2, 3, 4, 5};
-    EXPECT_EQ(arr.size(), 5);
-    
+
     arr.clear();
+
     EXPECT_EQ(arr.size(), 0);
     EXPECT_EQ(arr.capacity(), 5); // Capacity should remain
 }
@@ -624,13 +615,13 @@ TEST_F(DArrayTest, Clear) {
 // Test that iterators work correctly
 TEST_F(DArrayTest, Iterators) {
     DArray<int> arr = {1, 2, 3, 4, 5};
-    
+
     int sum = 0;
     for (auto it = arr.begin(); it != arr.end(); ++it) {
         sum += *it;
     }
     EXPECT_EQ(sum, 15);
-    
+
     // Test const iterators
     const DArray<int>& const_arr = arr;
     sum = 0;
@@ -643,10 +634,9 @@ TEST_F(DArrayTest, Iterators) {
 // Test that front() and back() work correctly
 TEST_F(DArrayTest, FrontAndBack) {
     DArray<int> arr = {1, 2, 3, 4, 5};
-    
     EXPECT_EQ(arr.front(), 1);
     EXPECT_EQ(arr.back(), 5);
-    
+
     const DArray<int>& const_arr = arr;
     EXPECT_EQ(const_arr.front(), 1);
     EXPECT_EQ(const_arr.back(), 5);
@@ -655,14 +645,13 @@ TEST_F(DArrayTest, FrontAndBack) {
 // Test that operator[] works correctly
 TEST_F(DArrayTest, SubscriptOperator) {
     DArray<int> arr = {1, 2, 3, 4, 5};
-    
     EXPECT_EQ(arr[0], 1);
     EXPECT_EQ(arr[2], 3);
     EXPECT_EQ(arr[4], 5);
-    
+
     arr[2] = 42;
     EXPECT_EQ(arr[2], 42);
-    
+
     const DArray<int>& const_arr = arr;
     EXPECT_EQ(const_arr[0], 1);
     EXPECT_EQ(const_arr[2], 42);
@@ -672,10 +661,10 @@ TEST_F(DArrayTest, SubscriptOperator) {
 TEST_F(DArrayTest, Empty) {
     DArray<int> arr1;
     EXPECT_TRUE(arr1.empty());
-    
+
     DArray<int> arr2 = {1, 2, 3};
     EXPECT_FALSE(arr2.empty());
-    
+
     arr2.clear();
     EXPECT_TRUE(arr2.empty());
 }
@@ -685,26 +674,163 @@ TEST_F(DArrayTest, SizeAndCapacity) {
     DArray<int> arr1;
     EXPECT_EQ(arr1.size(), 0);
     EXPECT_EQ(arr1.capacity(), 0);
-    
+
     DArray<int> arr2(10);
     EXPECT_EQ(arr2.size(), 10);
     EXPECT_EQ(arr2.capacity(), 10);
-    
+
     DArray<int> arr3 = {1, 2, 3};
     EXPECT_EQ(arr3.size(), 3);
     EXPECT_EQ(arr3.capacity(), 3);
 }
 
-// Test that maxSize() works correctly
-TEST_F(DArrayTest, MaxSize) {
-    DArray<int> arr;
-    EXPECT_EQ(arr.maxSize(), std::numeric_limits<size_t>::max() / sizeof(int));
-    
-    DArray<double> arr_double;
-    EXPECT_EQ(arr_double.maxSize(), std::numeric_limits<size_t>::max() / sizeof(double));
+// Test that copying push_back works correctly
+TEST_F(DArrayTest, PushBackCopy) {
+    const Probe elements[] = {1, 2, 3, 4, 5};
+    int expected_size[] = {1, 2, 3, 4, 5};
+    int expected_capacity[] = {1, 2, 4, 4, 8};
+    {
+        DArrayType arr;
+
+        for (int i = 0; i < std::size(elements); ++i) {
+            arr.push_back(elements[i]);
+            EXPECT_EQ(arr.size(), expected_size[i]);
+            EXPECT_EQ(arr.capacity(), expected_capacity[i]);
+            EXPECT_EQ(arr[i].id, elements[i].id);
+        }
+    }
+    EXPECT_EQ(TestAllocator::allocationCount, TestAllocator::deallocationCount);
+    EXPECT_EQ(Probe::constructionCount, Probe::destructionCount);
 }
 
-int main(int argc, char **argv) {
+// Test copying push_back with allocation failure
+TEST_F(DArrayTest, PushBackCopyAllocationFailure) {
+    const Probe elements[] = {1, 2, 3, 4, 5};
+    TestAllocator::allocationThrowsAt = 3;
+    {
+        DArrayType arr;
+
+        EXPECT_THROW(
+            {
+                for (const Probe& element : elements) {
+                    arr.push_back(element);
+                }
+            },
+            std::bad_alloc);
+
+        EXPECT_EQ(arr.size(), 2);
+        EXPECT_EQ(arr.capacity(), 2);
+        EXPECT_EQ(arr[0].id, 1);
+        EXPECT_EQ(arr[1].id, 2);
+    }
+    EXPECT_EQ(TestAllocator::allocationCount, TestAllocator::deallocationCount);
+    EXPECT_EQ(Probe::constructionCount, Probe::destructionCount);
+}
+
+// Test copying push_back with element construction failure
+TEST_F(DArrayTest, PushBackCopyElementFailure) {
+    const Probe elements[] = {1, 2, 3, 4, 5};
+    Probe::constructorThrowsAt = 8;
+    {
+        DArrayType arr;
+
+        EXPECT_THROW(
+            {
+                for (const Probe& element : elements) {
+                    arr.push_back(element);
+                }
+            },
+            std::runtime_error);
+
+        EXPECT_EQ(arr.size(), 4);
+        EXPECT_EQ(arr.capacity(), 4);
+        EXPECT_EQ(arr[0].id, 1);
+        EXPECT_EQ(arr[1].id, 2);
+        EXPECT_EQ(arr[2].id, 3);
+        EXPECT_EQ(arr[3].id, 4);
+    }
+    EXPECT_EQ(TestAllocator::allocationCount, TestAllocator::deallocationCount);
+    EXPECT_EQ(Probe::constructionCount, Probe::destructionCount);
+}
+
+// Test that moving push_back works correctly
+TEST_F(DArrayTest, PushBackMove) {
+    Probe elements[] = {1, 2, 3, 4, 5};
+    int expected_size[] = {1, 2, 3, 4, 5};
+    int expected_capacity[] = {1, 2, 4, 4, 8};
+    {
+        DArrayType arr;
+
+        for (int i = 0; i < std::size(elements); ++i) {
+            int id = elements[i].id;
+            arr.push_back(std::move(elements[i]));
+            EXPECT_EQ(arr.size(), expected_size[i]);
+            EXPECT_EQ(arr.capacity(), expected_capacity[i]);
+            EXPECT_EQ(arr[i].id, id);
+            EXPECT_EQ(elements[i].id, -1);
+        }
+    }
+    EXPECT_EQ(TestAllocator::allocationCount, TestAllocator::deallocationCount);
+    EXPECT_EQ(Probe::constructionCount, Probe::destructionCount);
+}
+
+// Test moving push_back with allocation failure
+TEST_F(DArrayTest, PushBackMoveAllocationFailure) {
+    Probe elements[] = {1, 2, 3, 4, 5};
+    TestAllocator::allocationThrowsAt = 3;
+    {
+        DArrayType arr;
+
+        EXPECT_THROW(
+            {
+                for (Probe& element : elements) {
+                    arr.push_back(std::move(element));
+                }
+            },
+            std::bad_alloc);
+
+        EXPECT_EQ(arr.size(), 2);
+        EXPECT_EQ(arr.capacity(), 2);
+        EXPECT_EQ(arr[0].id, 1);
+        EXPECT_EQ(arr[1].id, 2);
+        EXPECT_EQ(elements[0].id, -1);
+        EXPECT_EQ(elements[1].id, -1);
+        EXPECT_EQ(elements[2].id, 3);
+        EXPECT_EQ(elements[3].id, 4);
+        EXPECT_EQ(elements[4].id, 5);
+    }
+    EXPECT_EQ(TestAllocator::allocationCount, TestAllocator::deallocationCount);
+    EXPECT_EQ(Probe::constructionCount, Probe::destructionCount);
+}
+
+// Test that pop_back works correctly
+TEST_F(DArrayTest, PopBack) {
+    std::initializer_list<Probe> elements = {1, 2, 3, 4, 5};
+    {
+        DArrayType arr = elements;
+
+        arr.pop_back();
+        EXPECT_EQ(arr.size(), 4);
+        EXPECT_EQ(arr.capacity(), 5);
+        EXPECT_EQ(arr.back().id, 4);
+
+        arr.pop_back();
+        EXPECT_EQ(arr.size(), 3);
+        EXPECT_EQ(arr.capacity(), 5);
+        EXPECT_EQ(arr.back().id, 3);
+
+        arr.pop_back();
+        arr.pop_back();
+        arr.pop_back();
+        EXPECT_EQ(arr.size(), 0);
+        EXPECT_EQ(arr.capacity(), 5);
+        EXPECT_TRUE(arr.empty());
+    }
+    EXPECT_EQ(TestAllocator::allocationCount, TestAllocator::deallocationCount);
+    EXPECT_EQ(Probe::constructionCount, Probe::destructionCount);
+}
+
+int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

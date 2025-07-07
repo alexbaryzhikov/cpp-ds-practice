@@ -11,6 +11,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <string_view>
 
 template <typename T>
@@ -29,7 +30,7 @@ struct DefaultAllocator {
     }
 };
 
-template <typename ElementT, Allocator AllocatorT = DefaultAllocator> 
+template <typename ElementT, Allocator AllocatorT = DefaultAllocator>
 class DArray {
 private:
     ElementT* _data = nullptr;
@@ -78,12 +79,7 @@ public:
     }
 
     DArray& operator=(std::initializer_list<ElementT> elements) {
-        if (elements.size() > 0) {
-            CopyTransaction transaction(*this, elements.begin(), elements.end());
-            transaction.copyElements();
-        } else {
-            clear();
-        }
+        copy(elements.begin(), elements.end(), elements.size());
         return *this;
     }
 
@@ -98,27 +94,18 @@ public:
 
     DArray& operator=(const DArray& other) {
         if (this != std::addressof(other)) {
-            if (other.size() > 0) {
-                CopyTransaction transaction(*this, other.begin(), other.end());
-                transaction.copyElements();
-            } else {
-                clear();
-            }
+            copy(other.begin(), other.end(), other.size());
         }
         return *this;
     }
 
     DArray(DArray&& other) noexcept {
-        std::swap(_data, other._data);
-        std::swap(_size, other._size);
-        std::swap(_capacity, other._capacity);
+        swap(other);
     }
 
     DArray& operator=(DArray&& other) noexcept {
         destroy();
-        std::swap(_data, other._data);
-        std::swap(_size, other._size);
-        std::swap(_capacity, other._capacity);
+        swap(other);
         return *this;
     }
 
@@ -128,10 +115,6 @@ public:
 
     size_t size() const noexcept {
         return static_cast<size_t>(_size);
-    }
-
-    size_t maxSize() const noexcept {
-        return std::numeric_limits<size_t>::max() / sizeof(ElementT);
     }
 
     size_t capacity() const noexcept {
@@ -195,28 +178,62 @@ public:
         return _data + _size;
     }
 
+    void swap(DArray& other) noexcept {
+        std::swap(_data, other._data);
+        std::swap(_size, other._size);
+        std::swap(_capacity, other._capacity);
+    }
+
+    void push_back(const ElementT& element) {
+        if (_size < _capacity) {
+            constructOneAtEnd(element);
+        } else {
+            growAndConstructOneAtEnd(element);
+        }
+    }
+
+    void push_back(ElementT&& element) {
+        if (_size < _capacity) {
+            constructOneAtEnd(std::move(element));
+        } else {
+            growAndConstructOneAtEnd(std::move(element));
+        }
+    }
+
+    void pop_back() {
+        destructAtEnd(1);
+    }
+
 private:
     // Allocates array memory for n elements.
     // Precondition: n <= max size
     // Postcondition: size == 0
     // Postcondition: capacity == n
     void allocate(size_t n) {
+        _data = allocateData(n);
+        _size = 0;
+        _capacity = n;
+    }
+
+    ElementT* allocateData(size_t n) const {
         if (n > maxSize()) {
             throw std::bad_alloc();
         }
-        _data = static_cast<ElementT*>(_allocator.allocate(n * sizeof(ElementT), alignment()));
-        _size = 0;
-        _capacity = n;
+        return static_cast<ElementT*>(_allocator.allocate(n * sizeof(ElementT), alignment()));
     }
 
     // Deallocates array memory.
     // Postcondition: size == 0
     // Postcondition: capacity == 0
     void deallocate() noexcept {
-        _allocator.deallocate(_data, alignment());
+        deallocateData(_data);
         _data = nullptr;
         _size = 0;
         _capacity = 0;
+    }
+
+    void deallocateData(ElementT* ptr) const noexcept {
+        _allocator.deallocate(static_cast<void*>(ptr), alignment());
     }
 
     // Default constructs n objects starting at the end of the array.
@@ -274,6 +291,13 @@ private:
         return dst;
     }
 
+    static ElementT* moveRange(ElementT* begin, const ElementT* end, ElementT* dst) {
+        for (ElementT* src = begin; src != end; ++src, ++dst) {
+            new (dst) ElementT(std::move(*src));
+        }
+        return dst;
+    }
+
     // Destructs n object at the end of the array.
     // Precondition: n <= size
     // Postcondition: size == size - n
@@ -285,8 +309,53 @@ private:
         _size -= n;
     }
 
+    void copy(const ElementT* begin, const ElementT* end, size_t n) {
+        if (n > 0) {
+            CopyTransaction transaction(*this, begin, end, n);
+            transaction.copyElements();
+        } else {
+            clear();
+        }
+    }
+
+    template <typename... Args>
+    void constructOneAtEnd(Args&&... args) {
+        ElementT* pos = _data + _size;
+        new (pos) ElementT(std::forward<Args>(args)...);
+        ++_size;
+    }
+
+    template <typename... Args>
+    void growAndConstructOneAtEnd(Args&&... args) {
+        size_t newSize = _size + 1;
+        size_t newCapacity = extendedCapacity(newSize);
+        AllocateTransaction transaction(*this);
+        transaction.allocate(newCapacity);
+        new (transaction.data + _size) ElementT(std::forward<Args>(args)...);
+        moveRange(begin(), end(), transaction.data);
+        clear();
+        std::swap(_data, transaction.data);
+        _size = newSize;
+        _capacity = newCapacity;
+    }
+
     std::align_val_t alignment() const noexcept {
         return static_cast<std::align_val_t>(alignof(ElementT));
+    }
+
+    size_t maxSize() const noexcept {
+        return std::numeric_limits<size_t>::max() / sizeof(ElementT);
+    }
+
+    size_t extendedCapacity(size_t newSize) const {
+        size_t ms = maxSize();
+        if (newSize > ms) {
+            throw std::length_error("New array size is too high");
+        }
+        if (_capacity >= ms / 2) {
+            return ms;
+        }
+        return std::max(_capacity * 2, newSize);
     }
 
     struct ConstructTransaction {
@@ -317,21 +386,21 @@ private:
         const size_t size;
         ElementT* data = nullptr;
 
-        CopyTransaction(DArray& array, const ElementT* begin, const ElementT* end) 
+        CopyTransaction(DArray& array, const ElementT* begin, const ElementT* end, size_t size)
             : array(array)
             , begin(begin)
             , end(end)
-            , size(end - begin) {};
-        
+            , size(size) {};
+
         ~CopyTransaction() {
             if (data != nullptr) {
-                array._allocator.deallocate(data, array.alignment());
+                array.deallocateData(data);
                 data = nullptr;
             }
         }
 
         void copyElements() {
-            data = static_cast<ElementT*>(array._allocator.allocate(size * sizeof(ElementT), array.alignment()));
+            data = array.allocateData(size);
             copyRange(begin, end, data);
             array.clear();
             std::swap(array._data, data);
@@ -340,11 +409,32 @@ private:
         }
     };
 
+    struct AllocateTransaction {
+        DArray& array;
+        ElementT* data = nullptr;
+
+        AllocateTransaction(DArray& array)
+            : array(array) {};
+
+        ~AllocateTransaction() {
+            if (data != nullptr) {
+                array.deallocateData(data);
+                data = nullptr;
+            }
+        }
+
+        void allocate(size_t n) {
+            data = array.allocateData(n);
+        }
+    };
+
     struct DestructRangeInReverse {
         ElementT*& begin;
         ElementT*& end;
 
-        DestructRangeInReverse(ElementT*& begin, ElementT*& end): begin(begin), end(end) {}
+        DestructRangeInReverse(ElementT*& begin, ElementT*& end)
+            : begin(begin)
+            , end(end) {}
 
         void operator()() const {
             auto reverseBegin = std::reverse_iterator<ElementT*>(end);
@@ -358,8 +448,9 @@ private:
     struct DestroyArray {
         DArray& array;
 
-        DestroyArray(DArray& array) : array(array) {}
-        
+        DestroyArray(DArray& array)
+            : array(array) {}
+
         void operator()() {
             array.destroy();
         }
@@ -368,9 +459,9 @@ private:
     friend std::formatter<DArray<ElementT>>;
 };
 
-template<typename V>
-struct std::formatter<DArray<V>> : std::formatter<std::string_view> {
-    auto format(const DArray<V>& array, auto& context) const {
+template <typename ElementT>
+struct std::formatter<DArray<ElementT>> : std::formatter<std::string_view> {
+    auto format(const DArray<ElementT>& array, auto& context) const {
         std::string result = "[";
         for (int i = 0; i < array.size(); ++i) {
             if (i > 0) result += " ";
