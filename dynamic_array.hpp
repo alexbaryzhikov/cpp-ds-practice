@@ -31,6 +31,11 @@ struct DefaultAllocator {
     }
 };
 
+/**
+ * @brief A dynamic array (vector-like) implementation.
+ * @tparam ElementT The type of elements stored in the array.
+ * @tparam AllocatorT The allocator type to use for memory management. Defaults to `DefaultAllocator`.
+ */
 template <typename ElementT, Allocator AllocatorT = DefaultAllocator>
 class DArray {
 private:
@@ -40,8 +45,19 @@ private:
     AllocatorT _allocator;
 
 public:
+    /**
+     * @brief Default constructor.
+     * Constructs an empty DArray with no allocated memory.
+     */
     DArray() noexcept {}
 
+    /**
+     * @brief Size constructor.
+     * Constructs a DArray with `n` default-constructed elements.
+     * @param n The number of elements to construct.
+     * @throws std::bad_alloc If memory allocation fails.
+     * @throws Any exception thrown by the ElementT default constructor.
+     */
     explicit DArray(size_t n) {
         if (n > 0) {
             auto guard = std::__make_exception_guard(DestroyArray(*this));
@@ -51,6 +67,14 @@ public:
         }
     }
 
+    /**
+     * @brief Fill constructor.
+     * Constructs a DArray with `n` copies of `x`.
+     * @param x The value to fill the array with.
+     * @param n The number of elements to construct.
+     * @throws std::bad_alloc If memory allocation fails.
+     * @throws Any exception thrown by the ElementT copy constructor.
+     */
     DArray(const ElementT& x, size_t n) {
         if (n > 0) {
             auto guard = std::__make_exception_guard(DestroyArray(*this));
@@ -60,6 +84,14 @@ public:
         }
     }
 
+    /**
+     * @brief Range constructor.
+     * Constructs a DArray with elements from the range [first, last).
+     * @param first A pointer to the beginning of the range.
+     * @param last A pointer to the end of the range (one past the last element).
+     * @throws std::bad_alloc If memory allocation fails.
+     * @throws Any exception thrown by the ElementT copy constructor.
+     */
     DArray(const ElementT* first, const ElementT* last) {
         size_t n = static_cast<size_t>(last - first);
         if (n > 0) {
@@ -70,6 +102,13 @@ public:
         }
     }
 
+    /**
+     * @brief Initializer list constructor.
+     * Constructs a DArray with elements from an initializer list.
+     * @param elements An initializer list of elements.
+     * @throws std::bad_alloc If memory allocation fails.
+     * @throws Any exception thrown by the ElementT copy constructor.
+     */
     DArray(std::initializer_list<ElementT> elements) {
         if (elements.size() > 0) {
             auto guard = std::__make_exception_guard(DestroyArray(*this));
@@ -79,6 +118,13 @@ public:
         }
     }
 
+    /**
+     * @brief Copy constructor.
+     * Constructs a DArray as a copy of another DArray.
+     * @param other The DArray to copy.
+     * @throws std::bad_alloc If memory allocation fails.
+     * @throws Any exception thrown by the ElementT copy constructor.
+     */
     DArray(const DArray& other) {
         if (other.size() > 0) {
             auto guard = std::__make_exception_guard(DestroyArray(*this));
@@ -88,29 +134,72 @@ public:
         }
     }
 
+    /**
+     * @brief Move constructor.
+     * Constructs a DArray by moving the contents of another DArray.
+     * @param other The DArray to move from. After the move `other` is empty.
+     */
     DArray(DArray&& other) noexcept {
         swap(other);
     }
 
+    /**
+     * @brief Destructor.
+     * Destroys all elements and deallocates the memory.
+     */
     ~DArray() noexcept {
         destroy();
     }
 
+    /**
+     * @brief Assigns `n` copies of `element` to the DArray.
+     * Clears existing elements and constructs new ones.
+     * @param element The value to assign.
+     * @param n The number of times to copy `element`.
+     * @return A reference to the DArray.
+     * @throws std::bad_alloc If memory allocation fails.
+     * @throws Any exception thrown by the ElementT copy constructor.
+     */
     DArray& assign(const ElementT& element, size_t n) {
         copy(element, n);
         return *this;
     }
 
+    /**
+     * @brief Assigns elements from the range [first, last) to the DArray.
+     * Clears existing elements and constructs new ones.
+     * @param first A pointer to the beginning of the range.
+     * @param last A pointer to the end of the range.
+     * @return A reference to the DArray.
+     * @throws std::bad_alloc If memory allocation fails.
+     * @throws Any exception thrown by the ElementT copy constructor.
+     */
     DArray& assign(const ElementT* first, const ElementT* last) {
         copy(first, last, last - first);
         return *this;
     }
 
+    /**
+     * @brief Assignment operator from an initializer list.
+     * Assigns elements from an initializer list to the DArray.
+     * @param elements An initializer list of elements.
+     * @return A reference to the DArray.
+     * @throws std::bad_alloc If memory allocation fails.
+     * @throws Any exception thrown by the ElementT copy constructor.
+     */
     DArray& operator=(std::initializer_list<ElementT> elements) {
         copy(elements.begin(), elements.end(), elements.size());
         return *this;
     }
 
+    /**
+     * @brief Copy assignment operator.
+     * Assigns the contents of another DArray to this DArray.
+     * @param other The DArray to copy from.
+     * @return A reference to the DArray.
+     * @throws std::bad_alloc If memory allocation fails.
+     * @throws Any exception thrown by the ElementT copy constructor.
+     */
     DArray& operator=(const DArray& other) {
         if (this != std::addressof(other)) {
             copy(other.begin(), other.end(), other.size());
@@ -118,6 +207,12 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Move assignment operator.
+     * Moves the contents of another DArray to this DArray.
+     * @param other The DArray to move from. After the move `other` is empty.
+     * @return A reference to the DArray.
+     */
     DArray& operator=(DArray&& other) noexcept {
         if (this != std::addressof(other)) {
             destroy();
@@ -126,14 +221,32 @@ public:
         return *this;
     }
 
+    /**
+     * @brief Accesses the element at the specified index (non-const version).
+     * No bounds checking is performed.
+     * @param index The index of the element to access.
+     * @return A reference to the element at `index`.
+     */
     ElementT& operator[](size_t index) noexcept {
         return _data[index];
     }
 
+    /**
+     * @brief Accesses the element at the specified index (const version).
+     * No bounds checking is performed.
+     * @param index The index of the element to access.
+     * @return A const reference to the element at `index`.
+     */
     const ElementT& operator[](size_t index) const noexcept {
         return _data[index];
     }
 
+    /**
+     * @brief Accesses the element at the specified index with bounds checking (non-const version).
+     * @param index The index of the element to access.
+     * @return A reference to the element at `index`.
+     * @throws std::out_of_range If `index` is out of bounds.
+     */
     ElementT& at(size_t index) {
         if (index < _size) {
             return _data[index];
@@ -141,6 +254,12 @@ public:
         throw std::out_of_range("Index is out of range");
     }
 
+    /**
+     * @brief Accesses the element at the specified index with bounds checking (const version).
+     * @param index The index of the element to access.
+     * @return A const reference to the element at `index`.
+     * @throws std::out_of_range If `index` is out of bounds.
+     */
     const ElementT& at(size_t index) const {
         if (index < _size) {
             return _data[index];
@@ -148,78 +267,165 @@ public:
         throw std::out_of_range("Index is out of range");
     }
 
+    /**
+     * @brief Accesses the first element (non-const version).
+     * Undefined behavior if the array is empty.
+     * @return A reference to the first element.
+     */
     ElementT& front() noexcept {
         return _data[0];
     }
 
+    /**
+     * @brief Accesses the first element (const version).
+     * Undefined behavior if the array is empty.
+     * @return A const reference to the first element.
+     */
     const ElementT& front() const noexcept {
         return _data[0];
     }
 
+    /**
+     * @brief Accesses the last element (non-const version).
+     * Undefined behavior if the array is empty.
+     * @return A reference to the last element.
+     */
     ElementT& back() noexcept {
         return _data[_size - 1];
     }
 
+    /**
+     * @brief Accesses the last element (const version).
+     * Undefined behavior if the array is empty.
+     * @return A const reference to the last element.
+     */
     const ElementT& back() const noexcept {
         return _data[_size - 1];
     }
 
+    /**
+     * @brief Returns a pointer to the underlying array (non-const version).
+     * @return A pointer to the first element of the array. Returns `nullptr` if the array is empty.
+     */
     ElementT* data() noexcept {
         return _data;
     }
 
+    /**
+     * @brief Returns a pointer to the underlying array (const version).
+     * @return A const pointer to the first element of the array. Returns `nullptr` if the array is empty.
+     */
     const ElementT* data() const noexcept {
         return _data;
     }
 
+    /**
+     * @brief Returns an iterator to the beginning of the array (non-const version).
+     * @return An `ElementT*` pointing to the first element.
+     */
     ElementT* begin() noexcept {
         return _data;
     }
 
+    /**
+     * @brief Returns an iterator to the beginning of the array (const version).
+     * @return A `const ElementT*` pointing to the first element.
+     */
     const ElementT* begin() const noexcept {
         return _data;
     }
 
+    /**
+     * @brief Returns an iterator to the end of the array (non-const version).
+     * @return An `ElementT*` pointing one past the last element.
+     */
     ElementT* end() noexcept {
         return _data + _size;
     }
 
+    /**
+     * @brief Returns an iterator to the end of the array (const version).
+     * @return A `const ElementT*` pointing one past the last element.
+     */
     const ElementT* end() const noexcept {
         return _data + _size;
     }
 
+    /**
+     * @brief Returns a reverse iterator to the reverse beginning of the array (non-const version).
+     * @return A `std::reverse_iterator<ElementT*>` pointing to the last element.
+     */
     std::reverse_iterator<ElementT*> rbegin() noexcept {
         return std::reverse_iterator<ElementT*>(end());
     }
 
+    /**
+     * @brief Returns a reverse iterator to the reverse beginning of the array (const version).
+     * @return A `std::reverse_iterator<const ElementT*>` pointing to the last element.
+     */
     std::reverse_iterator<const ElementT*> rbegin() const noexcept {
         return std::reverse_iterator<const ElementT*>(end());
     }
 
+    /**
+     * @brief Returns a reverse iterator to the reverse end of the array (non-const version).
+     * @return A `std::reverse_iterator<ElementT*>` pointing one before the first element.
+     */
     std::reverse_iterator<ElementT*> rend() noexcept {
         return std::reverse_iterator<ElementT*>(begin());
     }
 
+    /**
+     * @brief Returns a reverse iterator to the reverse end of the array (const version).
+     * @return A `std::reverse_iterator<const ElementT*>` pointing one before the first element.
+     */
     std::reverse_iterator<const ElementT*> rend() const noexcept {
         return std::reverse_iterator<const ElementT*>(begin());
     }
 
+    /**
+     * @brief Checks if the DArray is empty.
+     * @return `true` if the DArray contains no elements, `false` otherwise.
+     */
     bool empty() const noexcept {
         return _size == 0;
     }
 
+    /**
+     * @brief Returns the number of elements in the DArray.
+     * @return The current number of elements.
+     */
     size_t size() const noexcept {
         return _size;
     }
 
+    /**
+     * @brief Returns the maximum possible number of elements the DArray can hold.
+     * This is limited by the maximum value of `size_t` and the size of `ElementT`.
+     * @return The maximum size.
+     */
     size_t maxSize() const noexcept {
         return std::numeric_limits<size_t>::max() / sizeof(ElementT);
     }
 
+    /**
+     * @brief Returns the current allocated capacity of the DArray.
+     * @return The current capacity.
+     */
     size_t capacity() const noexcept {
         return _capacity;
     }
 
+    /**
+     * @brief Reserves memory for at least `n` elements.
+     * If `n` is greater than the current capacity, a reallocation occurs,
+     * and existing elements are moved to the new memory block.
+     * If `n` is less than or equal to the current capacity, no action is taken.
+     * @param n The new minimum capacity.
+     * @throws std::length_error If `n` is greater than `maxSize()`.
+     * @throws std::bad_alloc If memory allocation fails during reallocation.
+     * @throws Any exception thrown by the ElementT move constructor.
+     */
     void reserve(size_t n) {
         if (n > _capacity) {
             if (n > maxSize()) {
@@ -234,6 +440,12 @@ public:
         }
     }
 
+    /**
+     * @brief Reduces the capacity of the DArray to fit its current size.
+     * If the current capacity is greater than the size, a reallocation occurs
+     * to a new memory block exactly large enough to hold the current elements.
+     * If an allocation fails, the operation is silently ignored (no throw).
+     */
     void shrinkToFit() noexcept {
         if (_capacity > _size) {
             if (_size > 0) {
@@ -252,12 +464,21 @@ public:
         }
     }
 
+    /**
+     * @brief Clears the contents of the DArray.
+     * Destroys all elements, but the allocated capacity remains unchanged.
+     * The size becomes 0.
+     */
     void clear() noexcept {
         if (_data != nullptr) {
             destructAtEnd(_size);
         }
     }
 
+    /**
+     * @brief Destroys all elements and deallocates the memory.
+     * The DArray becomes empty with a capacity of 0.
+     */
     void destroy() noexcept {
         if (_data != nullptr) {
             destructAtEnd(_size);
@@ -265,6 +486,15 @@ public:
         }
     }
 
+    /**
+     * @brief Inserts a copy of `element` at the specified `position`.
+     * Elements from `position` onwards are shifted to the right.
+     * @param position An iterator pointing to the position where the element should be inserted.
+     * @param element The element to insert.
+     * @return An iterator pointing to the newly inserted element.
+     * @throws std::bad_alloc If memory reallocation fails.
+     * @throws Any exception thrown by the ElementT copy/move constructor.
+     */
     ElementT* insert(ElementT* position, const ElementT& element) {
         size_t index = position - begin();
         if (_size < _capacity) {
@@ -279,6 +509,15 @@ public:
         return begin() + index;
     }
 
+    /**
+     * @brief Inserts `element` (moved) at the specified `position`.
+     * Elements from `position` onwards are shifted to the right.
+     * @param position An iterator pointing to the position where the element should be inserted.
+     * @param element The element to insert (rvalue reference).
+     * @return An iterator pointing to the newly inserted element.
+     * @throws std::bad_alloc If memory reallocation fails.
+     * @throws Any exception thrown by the ElementT move constructor.
+     */
     ElementT* insert(ElementT* position, ElementT&& element) {
         size_t index = position - begin();
         if (_size < _capacity) {
@@ -293,6 +532,16 @@ public:
         return begin() + index;
     }
 
+    /**
+     * @brief Inserts `n` copies of `element` at the specified `position`.
+     * Elements from `position` onwards are shifted to the right.
+     * @param position An iterator pointing to the position where elements should be inserted.
+     * @param element The element to insert.
+     * @param n The number of copies to insert.
+     * @return An iterator pointing to the first newly inserted element.
+     * @throws std::bad_alloc If memory reallocation fails.
+     * @throws Any exception thrown by the ElementT copy/move constructor.
+     */
     ElementT* insert(ElementT* position, const ElementT& element, size_t n) {
         size_t index = position - begin();
         if (n > 0) {
@@ -309,6 +558,16 @@ public:
         return begin() + index;
     }
 
+    /**
+     * @brief Inserts elements from the range [first, last) at the specified `position`.
+     * Elements from `position` onwards are shifted to the right.
+     * @param position An iterator pointing to the position where elements should be inserted.
+     * @param first A pointer to the beginning of the range.
+     * @param last A pointer to the end of the range.
+     * @return An iterator pointing to the first newly inserted element.
+     * @throws std::bad_alloc If memory reallocation fails.
+     * @throws Any exception thrown by the ElementT copy/move constructor.
+     */
     ElementT* insert(ElementT* position, const ElementT* first, const ElementT* last) {
         size_t index = position - begin();
         size_t n = last - first;
@@ -326,6 +585,15 @@ public:
         return begin() + index;
     }
 
+    /**
+     * @brief Inserts elements from an initializer list at the specified `position`.
+     * Elements from `position` onwards are shifted to the right.
+     * @param position An iterator pointing to the position where elements should be inserted.
+     * @param elements An initializer list of elements.
+     * @return An iterator pointing to the first newly inserted element.
+     * @throws std::bad_alloc If memory reallocation fails.
+     * @throws Any exception thrown by the ElementT copy/move constructor.
+     */
     ElementT* insert(ElementT* position, std::initializer_list<ElementT> elements) {
         size_t index = position - begin();
         if (elements.size() > 0) {
@@ -342,6 +610,12 @@ public:
         return begin() + index;
     }
 
+    /**
+     * @brief Erases the element at the specified `position`.
+     * Elements after the erased element are shifted to the left.
+     * @param position An iterator pointing to the element to erase.
+     * @return An iterator pointing to the element immediately following the erased element, or `end()` if the last element was erased.
+     */
     ElementT* erase(ElementT* position) noexcept {
         size_t index = position - begin();
         if (position == end() - 1) {
@@ -352,6 +626,13 @@ public:
         return begin() + index;
     }
 
+    /**
+     * @brief Erases elements in the range [first, last).
+     * Elements after the erased range are shifted to the left.
+     * @param first An iterator pointing to the first element to erase.
+     * @param last An iterator pointing one past the last element to erase.
+     * @return An iterator pointing to the element immediately following the erased range, or `end()` if the last elements were erased.
+     */
     ElementT* erase(ElementT* first, ElementT* last) {
         size_t index = first - begin();
         if (last == end()) {
@@ -362,6 +643,13 @@ public:
         return begin() + index;
     }
 
+    /**
+     * @brief Appends a copy of `element` to the end of the DArray.
+     * If the capacity is insufficient, a reallocation occurs.
+     * @param element The element to append.
+     * @throws std::bad_alloc If memory reallocation fails.
+     * @throws Any exception thrown by the ElementT copy/move constructor.
+     */
     void push(const ElementT& element) {
         if (_size < _capacity) {
             constructOneAtEnd(element);
@@ -370,6 +658,13 @@ public:
         }
     }
 
+    /**
+     * @brief Appends `element` (moved) to the end of the DArray.
+     * If the capacity is insufficient, a reallocation occurs.
+     * @param element The element to append (rvalue reference).
+     * @throws std::bad_alloc If memory reallocation fails.
+     * @throws Any exception thrown by the ElementT move constructor.
+     */
     void push(ElementT&& element) {
         if (_size < _capacity) {
             constructOneAtEnd(std::move(element));
@@ -378,10 +673,24 @@ public:
         }
     }
 
+    /**
+     * @brief Removes the last element from the DArray.
+     * Undefined behavior if the array is empty.
+     */
     void pop() {
         destructAtEnd(1);
     }
 
+    /**
+     * @brief Constructs an element in-place at the end of the DArray.
+     * Arguments are perfectly forwarded to the element's constructor.
+     * If the capacity is insufficient, a reallocation occurs.
+     * @tparam Args Types of arguments for the element's constructor.
+     * @param args Arguments to forward to the element's constructor.
+     * @return A reference to the newly constructed element.
+     * @throws std::bad_alloc If memory reallocation fails.
+     * @throws Any exception thrown by the ElementT constructor.
+     */
     template <typename... Args>
     ElementT& emplaceAtEnd(Args&&... args) {
         if (_size < _capacity) {
@@ -392,6 +701,17 @@ public:
         return back();
     }
 
+    /**
+     * @brief Constructs an element in-place at the specified `position`.
+     * Arguments are perfectly forwarded to the element's constructor.
+     * Elements from `position` onwards are shifted to the right.
+     * @tparam Args Types of arguments for the element's constructor.
+     * @param position An iterator pointing to the position where the element should be constructed.
+     * @param args Arguments to forward to the element's constructor.
+     * @return A reference to the newly constructed element.
+     * @throws std::bad_alloc If memory reallocation fails.
+     * @throws Any exception thrown by the ElementT constructor.
+     */
     template <typename... Args>
     ElementT& emplace(ElementT* position, Args&&... args) {
         size_t index = position - begin();
@@ -407,6 +727,11 @@ public:
         return _data[index];
     }
 
+    /**
+     * @brief Swaps the contents of this DArray with another DArray.
+     * This operation is efficient as it only swaps internal pointers and metadata.
+     * @param other The DArray to swap with.
+     */
     void swap(DArray& other) noexcept {
         std::swap(_data, other._data);
         std::swap(_size, other._size);
@@ -414,10 +739,6 @@ public:
     }
 
 private:
-    // Allocates array memory for n elements.
-    // Precondition: n <= max size
-    // Postcondition: size == 0
-    // Postcondition: capacity == n
     void allocate(size_t n) {
         _data = allocateData(n);
         _size = 0;
@@ -431,9 +752,6 @@ private:
         return static_cast<ElementT*>(_allocator.allocate(n * sizeof(ElementT), alignment()));
     }
 
-    // Deallocates array memory.
-    // Postcondition: size == 0
-    // Postcondition: capacity == 0
     void deallocate() noexcept {
         deallocateData(_data);
         _data = nullptr;
@@ -445,10 +763,6 @@ private:
         _allocator.deallocate(static_cast<void*>(ptr), alignment());
     }
 
-    // Default constructs n objects starting at the end of the array.
-    // Precondition: n > 0
-    // Precondition: size + n <= capacity
-    // Postcondition: size == size + n
     void constructAtEnd(size_t n) {
         assert(n > 0);
         assert(_size + n <= _capacity);
@@ -465,11 +779,6 @@ private:
         guard.__complete();
     }
 
-    // Copy constructs n objects from x starting at the end of the array.
-    // Precondition: n > 0
-    // Precondition: size + n <= capacity
-    // Postcondition: size == size + n
-    // Postcondition: array[i] == x for all i in [size - n, size)
     void constructAtEnd(const ElementT& element, size_t n) {
         assert(n > 0);
         assert(_size + n <= _capacity);
@@ -486,11 +795,6 @@ private:
         guard.__complete();
     }
 
-    // Copy constructs objects from range [first, last) starting at the end of the array.
-    // Precondition: n > 0
-    // Precondition: size + n <= capacity
-    // Postcondition: size == size + n
-    // Postcondition: array[i] == range[j] for all i in [size - n, size) and j in [0, n)
     void constructAtEnd(const ElementT* first, const ElementT* last, size_t n) {
         assert(n > 0);
         assert(_size + n <= _capacity);
@@ -498,9 +802,6 @@ private:
         _size += n;
     }
 
-    // Copy a range of elements to a new place.
-    // Precondition: [first, last) and [dst, dst + distance(first, last)) do not overlap
-    // Postcondition: a == b for all a in [first, last) and b in [dst, dst + distance(first, last))
     static void copyRange(const ElementT* first, const ElementT* last, ElementT* dst) {
         auto dstCopy = dst;
         auto guard = std::__make_exception_guard(DestructRangeInReverse(dstCopy, dst));
@@ -510,18 +811,12 @@ private:
         guard.__complete();
     }
 
-    // Move a range of elements to a new place.
-    // Precondition: [first, last) and [dst, dst + distance(first, last)) do not overlap
-    // Postcondition: a -> b for all a in [first, last) and b in [dst, dst + distance(first, last))
     static void moveRange(ElementT* first, ElementT* last, ElementT* dst) {
         for (; first != last; ++first, ++dst) {
             new (dst) ElementT(std::move(*first));
         }
     }
 
-    // Destructs n object at the end of the array.
-    // Precondition: n <= size
-    // Postcondition: size == size - n
     void destructAtEnd(size_t n) noexcept {
         assert(n <= _size);
         ElementT* srcBegin = end() - n;
@@ -668,13 +963,6 @@ private:
         guard.__complete();
     }
 
-    // Moves the array tail right.
-    // Precondition: position in [begin, end)
-    // Precondition: n > 0
-    // Precondition: size + n <= capacity
-    // Postcondition: a -> b for all a in [position, end) and b in [position + n, end + n)
-    // Postcondition: [position, position + n) is empty
-    // Postcondition: size = size + n
     void shiftTailRight(ElementT* position, size_t n) noexcept {
         assert(std::__is_pointer_in_range(begin(), end(), position));
         assert(n > 0);
@@ -689,14 +977,6 @@ private:
         _size += n;
     }
 
-    // Moves the array tail left.
-    // Precondition: position in [begin, end)
-    // Precondition: n > 0
-    // Precondition: position - n >= begin
-    // Precondition: [position - n, position) is empty
-    // Postcondition: a -> b for all a in [position, end) and b in [position - n, end - n)
-    // Postcondition: [end - n, end) is empty
-    // Postcondition: size = size - n
     void shiftTailLeft(ElementT* position, size_t n) noexcept {
         assert(std::__is_pointer_in_range(begin(), end(), position));
         assert(n > 0);
