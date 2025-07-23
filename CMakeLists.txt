@@ -21,6 +21,8 @@ add_executable(dynamic_array_example dynamic_array_example.cpp)
 add_executable(dynamic_array_test dynamic_array_test.cpp)
 target_link_libraries(dynamic_array_test GTest::gtest_main)
 
+add_executable(unique_pointer_example unique_pointer_example.cpp)
+
 add_executable(type_list_example type_list_example.cpp)
 
 add_executable(type_list_test type_list_test.cpp)
