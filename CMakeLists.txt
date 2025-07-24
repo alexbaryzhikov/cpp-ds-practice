@@ -23,6 +23,9 @@ target_link_libraries(dynamic_array_test GTest::gtest_main)
 
 add_executable(unique_pointer_example unique_pointer_example.cpp)
 
+add_executable(unique_pointer_test unique_pointer_test.cpp)
+target_link_libraries(unique_pointer_test GTest::gtest_main)
+
 add_executable(type_list_example type_list_example.cpp)
 
 add_executable(type_list_test type_list_test.cpp)
@@ -30,4 +33,5 @@ target_link_libraries(type_list_test GTest::gtest_main)
 
 enable_testing()
 add_test(NAME type_list_test COMMAND type_list_test)
-add_test(NAME dynamic_array_test COMMAND dynamic_array_test) 
+add_test(NAME dynamic_array_test COMMAND dynamic_array_test)
+add_test(NAME unique_pointer_test COMMAND unique_pointer_test)
